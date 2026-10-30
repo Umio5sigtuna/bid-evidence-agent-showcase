@@ -1,44 +1,36 @@
-export const project = {
-  id: "DEMO-001",
-  name: "虚构市政道路工程",
-  revision: "demo-v1",
-};
-export const reference = {
-  id: "DEMO-REF-001",
-  title: "虚构工作记录示例",
-  page: 1,
-  text: "示例工作记录应包含任务名称、负责人、完成状态和依据编号。",
-};
-export const tools = [
-  {
-    id: "read",
-    name: "读取演示资料",
-    detail: "载入内置虚构文本，不读取磁盘标书",
-  },
-  {
-    id: "retrieve",
-    name: "选择示例依据",
-    detail: "返回预置引用，不运行真实知识检索",
-  },
-  {
-    id: "summarize",
-    name: "生成演示摘要",
-    detail: "组合模板说明，不调用大语言模型",
-  },
-] as const;
+import scenario from "../demo/scenario.json";
+export const { project, reference, tools, answer, question } = scenario;
 export type Event = {
   sequence: number;
   run_id: string;
   project_id: string;
-  kind: "started" | "tool_started" | "tool_completed" | "delta" | "completed";
+  kind:
+    | "started"
+    | "tool_started"
+    | "tool_completed"
+    | "delta"
+    | "completed"
+    | "cancelled";
   tool?: string;
   duration_ms?: number;
   text?: string;
 };
-export const answer =
-  "### 让结果与依据对应\n\n每条检查记录可以关联资料编号、版本与页码，复核时沿原文核对。\n\n> " +
-  reference.text +
-  "\n\n示例来源：**DEMO-REF-001 · 示例页 1**。\n\n本页使用预置文本演示交互，未检索真实规范、未调用模型，也不输出工程质量结论。";
+export type Phase =
+  "idle" | "submitting" | "running" | "completed" | "cancelled" | "failed";
+export type View = {
+  lastSequence: number;
+  phase: Phase;
+  text: string;
+  events: Event[];
+  error: string;
+};
+export const emptyView = (): View => ({
+  lastSequence: 0,
+  phase: "idle",
+  text: "",
+  events: [],
+  error: "",
+});
 export function assertEvent(value: unknown, runId: string): Event {
   const v = value as Event;
   if (
@@ -47,62 +39,65 @@ export function assertEvent(value: unknown, runId: string): Event {
     v.project_id !== project.id ||
     !Number.isInteger(v.sequence) ||
     v.sequence < 1 ||
+    v.sequence > 1000 ||
     ![
       "started",
       "tool_started",
       "tool_completed",
       "delta",
       "completed",
+      "cancelled",
     ].includes(v.kind)
   )
     throw Error("执行记录身份不一致");
   if (
-    v.text !== undefined &&
+    v.kind === "delta" &&
     (typeof v.text !== "string" || v.text.length > 16000)
   )
-    throw Error("消息超出展示范围");
+    throw Error("文本事件不完整");
+  if (
+    (v.kind === "tool_started" || v.kind === "tool_completed") &&
+    !tools.some((t) => t.id === v.tool)
+  )
+    throw Error("包含未登记工具");
   if (v.tool !== undefined && !tools.some((t) => t.id === v.tool))
     throw Error("包含未登记工具");
+  if (
+    v.duration_ms !== undefined &&
+    (!Number.isFinite(v.duration_ms) || v.duration_ms < 0)
+  )
+    throw Error("耗时事件无效");
   return v;
 }
-export type View = {
-  lastSequence: number;
-  phase: "idle" | "running" | "completed";
-  activeTool: string | null;
-  completedTools: string[];
-  text: string;
-  events: Event[];
-};
-export const emptyView = (): View => ({
-  lastSequence: 0,
-  phase: "idle",
-  activeTool: null,
-  completedTools: [],
-  text: "",
-  events: [],
-});
 export function reduceEvent(view: View, event: Event): View {
-  if (event.sequence <= view.lastSequence || view.phase === "completed")
+  if (
+    event.sequence <= view.lastSequence ||
+    ["completed", "cancelled", "failed"].includes(view.phase)
+  )
     return view;
   if (event.sequence !== view.lastSequence + 1)
     throw Error("事件中断，请重新读取执行记录");
-  const next = {
+  return {
     ...view,
     lastSequence: event.sequence,
     events: [...view.events, event],
+    phase:
+      event.kind === "completed"
+        ? "completed"
+        : event.kind === "cancelled"
+          ? "cancelled"
+          : "running",
+    text: view.text + (event.kind === "delta" ? event.text || "" : ""),
   };
-  if (event.kind === "started") next.phase = "running";
-  if (event.kind === "tool_started") next.activeTool = event.tool || null;
-  if (event.kind === "tool_completed") {
-    next.activeTool = null;
-    next.completedTools = [...new Set([...view.completedTools, event.tool!])];
-  }
-  if (event.kind === "delta") next.text += event.text || "";
-  if (event.kind === "completed") {
-    next.phase = "completed";
-    next.activeTool = null;
-  }
-  return next;
+}
+export function toolStatus(view: View, id: string) {
+  const records = view.events.filter((e) => e.tool === id);
+  const last = records.at(-1);
+  return last?.kind === "tool_completed"
+    ? "completed"
+    : last?.kind === "tool_started" && view.phase === "running"
+      ? "running"
+      : "pending";
 }
 function wait(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -136,16 +131,16 @@ export async function simulate(
   for (const tool of tools) {
     emit({ kind: "tool_started", tool: tool.id });
     const start = performance.now();
-    await wait(350, signal);
+    await wait(140, signal);
     emit({
       kind: "tool_completed",
       tool: tool.id,
       duration_ms: Math.round(performance.now() - start),
     });
   }
-  for (let i = 0; i < answer.length; i += 18) {
-    await wait(45, signal);
-    emit({ kind: "delta", text: answer.slice(i, i + 18) });
+  for (let i = 0; i < answer.length; i += 32) {
+    await wait(18, signal);
+    emit({ kind: "delta", text: answer.slice(i, i + 32) });
   }
   emit({ kind: "completed" });
 }

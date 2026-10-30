@@ -21,6 +21,10 @@
 - **可以阅读的工程代码**：类型化消息、来源身份校验、事件顺序与重复保护、请求幂等、并发容量控制及请求取消。
 - **设计说明与自动化检查**：架构文档、公开范围说明、前后端测试与 GitHub Actions 定义。
 
+界面采用统一的浅色 / 深色主题和紧凑工作区；操作区首屏可见，流程图按需加载。演示支持停止、重新执行及复制结果，切换到项目说明后保留本次状态。
+
+演示问题、文本和工具清单只在 `demo/scenario.json` 维护，前后端共同读取；`scripts/sync-demo.mjs` 在构建时生成可查看的示例文本。
+
 演示回答由模板生成，三个工具也只处理人工样例。**本仓库不运行真实检索、LLM、评分或标书质量判断。**
 
 ## 完整版技术选型与公开范围
@@ -53,7 +57,7 @@ npm run dev
 python -m venv .venv
 # 激活虚拟环境后
 python -m pip install -r requirements.txt
-python -m uvicorn backend.app:app --host 127.0.0.1 --port 8093
+python -m uvicorn backend.app:app --host 127.0.0.1 --port 8093 --timeout-graceful-shutdown 5
 ```
 
 再开一个终端指定本机演示后端：

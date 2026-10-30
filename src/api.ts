@@ -25,6 +25,7 @@ export async function startBackend(
   question: string,
   signal: AbortSignal,
   receive: (event: Event) => void,
+  onRun?: (id: string) => void,
 ): Promise<string> {
   const response = await fetch(base + "/api/demo/runs", {
     method: "POST",
@@ -40,6 +41,7 @@ export async function startBackend(
   const run = await response.json();
   if (!/^demo-[a-f0-9]{24}$/.test(run.run_id) || run.project_id !== project.id)
     throw Error("演示任务身份不一致");
+  onRun?.(run.run_id);
   await new Promise<void>((resolve, reject) => {
     const stream = new EventSource(
       base + "/api/demo/runs/" + run.run_id + "/events",
@@ -61,7 +63,7 @@ export async function startBackend(
           run.run_id,
         );
         receive(parsed);
-        if (parsed.kind === "completed") {
+        if (parsed.kind === "completed" || parsed.kind === "cancelled") {
           stop();
           resolve();
         }
@@ -76,4 +78,19 @@ export async function startBackend(
     };
   });
   return run.run_id;
+}
+export async function cancelBackend(
+  base: string,
+  runId: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(base + "/api/demo/runs/" + runId + "/cancel", {
+      method: "POST",
+      keepalive: true,
+      signal: AbortSignal.timeout(5000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }

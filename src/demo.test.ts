@@ -33,6 +33,21 @@ describe("public demo event contracts", () => {
   });
   it("rejects gaps instead of claiming all steps were read", () =>
     expect(() => reduceEvent(emptyView(), event(2))).toThrow());
+  it("does not accept late completed events after cancellation", () => {
+    const stopped = reduceEvent(
+      reduceEvent(emptyView(), event(1)),
+      event(2, "cancelled"),
+    );
+    expect(reduceEvent(stopped, event(3, "completed")).phase).toBe("cancelled");
+  });
+  it("rejects malformed text and timing events", () => {
+    expect(() =>
+      assertEvent({ ...event(1, "delta"), text: null }, "demo-test"),
+    ).toThrow();
+    expect(() =>
+      assertEvent({ ...event(1), duration_ms: -1 }, "demo-test"),
+    ).toThrow();
+  });
   it("rejects remote or credential-bearing backend URLs", () => {
     for (const url of [
       "https://example.com",

@@ -12,7 +12,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
-    "format": "prettier --write src *.json vite.config.ts README.md docs/*.md .github/workflows/*.yml"
+    "format": "prettier --write src *.json vite.config.ts README.md docs/*.md .github/workflows/*.yml",
+    "prebuild": "node scripts/sync-demo.mjs",
+    "predev": "node scripts/sync-demo.mjs"
   },
   "dependencies": {
     "@xyflow/react": "12.12.0",

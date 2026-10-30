@@ -1,17 +1,19 @@
-"""Synthetic portfolio server. No production imports, model calls or file reads."""
+"""Synthetic portfolio server. Only the committed public fixture is read."""
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Literal
 import asyncio, json, time, uuid
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
-PROJECT = 'DEMO-001'
-REFERENCE = '示例工作记录应包含任务名称、负责人、完成状态和依据编号。'
-ANSWER = '### 让结果与依据对应\n\n每条检查记录可以关联资料编号、版本与页码，复核时沿原文核对。\n\n> ' + REFERENCE + '\n\n示例来源：**DEMO-REF-001 · 示例页 1**。\n\n本页使用预置文本演示交互，未检索真实规范、未调用模型，也不输出工程质量结论。'
-TOOLS = ('read', 'retrieve', 'summarize')
+SCENARIO = json.loads((Path(__file__).resolve().parents[1] / 'demo/scenario.json').read_text('utf8'))
+PROJECT = SCENARIO['project']['id']
+REFERENCE = SCENARIO['reference']['text']
+ANSWER = SCENARIO['answer']
+TOOLS = tuple(tool['id'] for tool in SCENARIO['tools'])
 
 class RunInput(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
@@ -31,7 +33,7 @@ class Run:
 
 class Store:
 
-    def __init__(self, delay=0.35):
+    def __init__(self, delay=0.14):
         self.runs = {}
         self.requests = {}
         self.slots = asyncio.Semaphore(2)
@@ -39,7 +41,7 @@ class Store:
 
     def cleanup(self):
         for key, run in list(self.runs.items()):
-            if run.state == 'completed' and time.monotonic() - run.created > 1800:
+            if run.state in ('completed','cancelled') and time.monotonic() - run.created > 1800:
                 self.runs.pop(key)
                 self.requests.pop(run.request_id, None)
 
@@ -63,6 +65,11 @@ class Store:
     def emit(self, run, kind, **fields):
         run.events.append(dict(sequence=len(run.events) + 1, run_id=run.id, project_id=PROJECT, kind=kind, **fields))
 
+    def cancel(self, run):
+        if run.state in ('completed','cancelled'):return
+        run.state='cancelled';self.emit(run,'cancelled')
+        if run.task:run.task.cancel()
+
     async def execute(self, run):
         async with self.slots:
             run.state = 'running'
@@ -72,9 +79,9 @@ class Store:
                 start = time.monotonic()
                 await asyncio.sleep(self.delay)
                 self.emit(run, 'tool_completed', tool=tool, duration_ms=round((time.monotonic() - start) * 1000))
-            for i in range(0, len(ANSWER), 18):
+            for i in range(0, len(ANSWER), 32):
                 await asyncio.sleep(self.delay / 7)
-                self.emit(run, 'delta', text=ANSWER[i:i + 18])
+                self.emit(run, 'delta', text=ANSWER[i:i + 32])
             self.emit(run, 'completed')
             run.state = 'completed'
 
@@ -84,7 +91,7 @@ class Store:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-def create_app(*, delay=0.35):
+def create_app(*, delay=0.14):
     store = Store(delay)
 
     @asynccontextmanager
@@ -113,6 +120,13 @@ def create_app(*, delay=0.35):
             raise HTTPException(404, 'demo_run_not_found')
         return dict(run_id=run.id, project_id=PROJECT, state=run.state, events=run.events, model_calls=0)
 
+    @app.post('/api/demo/runs/{run_id}/cancel')
+    async def cancel(run_id:str):
+        run=store.runs.get(run_id)
+        if not run:raise HTTPException(404,'demo_run_not_found')
+        store.cancel(run)
+        return dict(run_id=run.id,state=run.state)
+
     @app.get('/api/demo/runs/{run_id}/events')
     async def events(run_id: str, request: Request, after: int=0):
         run = store.runs.get(run_id)
@@ -131,7 +145,7 @@ def create_app(*, delay=0.35):
                 for event in run.events[cursor:]:
                     cursor = event['sequence']
                     yield ('id: ' + str(cursor) + '\nevent: demo\ndata: ' + json.dumps(event, ensure_ascii=False) + '\n\n')
-                if run.state == 'completed':
+                if run.state in ('completed','cancelled'):
                     return
                 yield ': keepalive\n\n'
                 await asyncio.sleep(0.05)

@@ -4,6 +4,18 @@ from backend.app import create_app
 
 class DemoTests(unittest.TestCase):
 
+    def test_cancel_is_terminal_and_replay_does_not_restart(self):
+        self.client.app.state.demo.delay=1
+        run_id=self.create()
+        response=self.client.post('/api/demo/runs/'+run_id+'/cancel')
+        self.assertEqual(response.json()['state'],'cancelled')
+        again=self.client.post('/api/demo/runs',json=self.body()).json()
+        self.assertTrue(again['reused']);self.assertEqual(again['state'],'cancelled')
+        time.sleep(.03)
+        result=self.client.get('/api/demo/runs/'+run_id).json()
+        self.assertEqual(result['events'][-1]['kind'],'cancelled')
+        self.assertNotIn('completed',[event['kind'] for event in result['events']])
+
     def setUp(self):
         self.client = TestClient(create_app(delay=0.001))
         self.client.__enter__()
