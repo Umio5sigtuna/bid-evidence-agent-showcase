@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.sqlite*
+*.db
+*.pdf
+*.docx
+*.zip
+*.log
+coverage/
+test-results/
+.DS_Store
