@@ -2,6 +2,8 @@
 
 **施工组织设计证据审查平台的独立展示工程**
 
+[在线交互演示](https://umio5sigtuna.github.io/bid-evidence-agent-showcase/) · [自动化验证](https://github.com/Umio5sigtuna/bid-evidence-agent-showcase/actions/workflows/verify.yml) · [架构说明](docs/ARCHITECTURE.md)
+
 面向 Agent / 大模型应用 / Python 后端岗位的作品展示。你可以直接运行界面，观察工具节点、流式文本、依据卡片与执行时间线；全部示例数据为人工编写，无需模型密钥。
 
 ![交互演示](docs/assets/workspace.png)
